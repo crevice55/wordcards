@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block title %}Покинуть курс — WordCards{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-danger">
+            <div class="card-body p-4">
+                <h1 class="h3 mb-3">Покинуть курс</h1>
+                <p>
+                    Вы действительно хотите покинуть курс <strong>{{ enrollment.course.title }}</strong>?
+                    Запись останется в «Моих курсах» со статусом «Прерван», и вы сможете записаться снова.
+                </p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-danger">Да, покинуть</button>
+                        <a href="{% url 'enrollment_settings' enrollment.pk %}" class="btn btn-outline-secondary">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

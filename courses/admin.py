@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Card, Course
+from .models import Card, Course, Enrollment
 
 
 class CardInline(admin.TabularInline):
@@ -21,3 +21,10 @@ class CardAdmin(admin.ModelAdmin):
     list_display = ('word', 'translation', 'course')
     list_filter = ('course',)
     search_fields = ('word', 'translation')
+
+
+@admin.register(Enrollment)
+class EnrollmentAdmin(admin.ModelAdmin):
+    list_display = ('student', 'course', 'status', 'seconds_per_word', 'enrolled_at')
+    list_filter = ('status', 'course')
+    search_fields = ('student__username', 'course__title')

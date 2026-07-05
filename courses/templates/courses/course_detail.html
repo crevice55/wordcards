@@ -21,6 +21,20 @@
     {% endif %}
 </div>
 
+{% if user.role == 'student' %}
+    <div class="mb-3">
+        {% if enrollment and enrollment.status != 'abandoned' %}
+            <span class="badge {% if enrollment.status == 'completed' %}bg-success{% else %}bg-primary{% endif %} fs-6 me-2">{{ enrollment.get_status_display }}</span>
+            <a href="{% url 'enrollment_settings' enrollment.pk %}" class="btn btn-outline-primary btn-sm">Настройки</a>
+        {% else %}
+            <form method="post" action="{% url 'enroll' course.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">Записаться</button>
+            </form>
+        {% endif %}
+    </div>
+{% endif %}
+
 {% if course.description %}
     <p class="lead">{{ course.description|linebreaksbr }}</p>
 {% endif %}

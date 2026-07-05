@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block title %}Мои курсы — WordCards{% endblock %}
+
+{% block content %}
+<h1 class="h2 mb-4">Мои курсы</h1>
+
+{% if enrollments %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Курс</th>
+                        <th>Автор</th>
+                        <th class="text-center">Статус</th>
+                        <th class="text-center">Карточек</th>
+                        <th class="text-center">Время прохождения</th>
+                        <th class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for enrollment in enrollments %}
+                        <tr>
+                            <td><a href="{% url 'course_detail' enrollment.course.pk %}">{{ enrollment.course.title }}</a></td>
+                            <td>{{ enrollment.course.author.username }}</td>
+                            <td class="text-center">
+                                <span class="badge {% if enrollment.status == 'active' %}bg-primary{% elif enrollment.status == 'completed' %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ enrollment.get_status_display }}
+                                </span>
+                            </td>
+                            <td class="text-center">{{ enrollment.card_count }}</td>
+                            <td class="text-center">
+                                {% if enrollment.card_count %}~{{ enrollment.estimated_minutes }} мин{% else %}—{% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if enrollment.status == 'abandoned' %}
+                                    <form method="post" action="{% url 'enroll' enrollment.course.pk %}" class="d-inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-primary btn-sm">Записаться снова</button>
+                                    </form>
+                                {% else %}
+                                    <a href="{% url 'enrollment_settings' enrollment.pk %}" class="btn btn-outline-primary btn-sm">Настройки</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div class="alert alert-secondary">
+        Вы пока не записаны ни на один курс.
+        <a href="{% url 'course_list' %}">Посмотреть доступные курсы</a>
+    </div>
+{% endif %}
+{% endblock %}

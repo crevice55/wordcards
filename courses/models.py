@@ -38,6 +38,52 @@ class Course(models.Model):
         return math.ceil(count * self.seconds_per_word / 60)
 
 
+class Enrollment(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'В процессе'
+        COMPLETED = 'completed', 'Завершён'
+        ABANDONED = 'abandoned', 'Прерван'
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='enrollments',
+        verbose_name='Ученик',
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='enrollments',
+        verbose_name='Курс',
+    )
+    seconds_per_word = models.PositiveIntegerField('Время на одно слово (сек)')
+    status = models.CharField(
+        'Статус',
+        max_length=10,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+    enrolled_at = models.DateTimeField('Дата записи', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Запись на курс'
+        verbose_name_plural = 'Записи на курсы'
+        constraints = [
+            models.UniqueConstraint(fields=['student', 'course'], name='unique_student_course'),
+        ]
+        ordering = ['-enrolled_at']
+
+    def __str__(self):
+        return f'{self.student.username} — {self.course.title}'
+
+    @property
+    def estimated_minutes(self):
+        count = getattr(self, 'card_count', None)
+        if count is None:
+            count = self.course.cards.count()
+        return math.ceil(count * self.seconds_per_word / 60)
+
+
 class Card(models.Model):
     course = models.ForeignKey(
         Course,
