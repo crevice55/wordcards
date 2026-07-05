@@ -20,6 +20,7 @@
                             <span class="badge bg-info fs-6">{{ user.get_role_display }}</span>
                         {% endif %}
                     </p>
+                    <a href="{% url 'course_list' %}" class="btn btn-primary">Перейти к курсам</a>
                 {% else %}
                     <p class="lead">Добро пожаловать! Войдите или зарегистрируйтесь, чтобы начать.</p>
                     <div class="d-flex justify-content-center gap-2">

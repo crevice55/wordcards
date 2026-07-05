@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ course.title }} — WordCards{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h2 mb-1">{{ course.title }}</h1>
+        <p class="text-muted mb-0">
+            Автор: {{ course.author.username }} ·
+            {{ course.cards.count }} карточек ·
+            {{ course.seconds_per_word }} сек на слово ·
+            ~{{ course.estimated_minutes }} мин
+        </p>
+    </div>
+    {% if is_author %}
+        <div class="d-flex gap-2">
+            <a href="{% url 'course_edit' course.pk %}" class="btn btn-outline-primary btn-sm">Редактировать</a>
+            <a href="{% url 'course_delete' course.pk %}" class="btn btn-outline-danger btn-sm">Удалить</a>
+        </div>
+    {% endif %}
+</div>
+
+{% if course.description %}
+    <p class="lead">{{ course.description|linebreaksbr }}</p>
+{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2 class="h4 mb-0">Карточки</h2>
+    {% if is_author %}
+        <a href="{% url 'card_add' course.pk %}" class="btn btn-success btn-sm">Добавить карточку</a>
+    {% endif %}
+</div>
+
+{% if course.cards.all %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-striped align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 4rem;">#</th>
+                        <th>Слово</th>
+                        {% if show_translations %}<th>Перевод</th>{% endif %}
+                        {% if is_author %}<th class="text-end">Действия</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for card in course.cards.all %}
+                        <tr>
+                            <td>{{ forloop.counter }}</td>
+                            <td>{{ card.word }}</td>
+                            {% if show_translations %}<td>{{ card.translation }}</td>{% endif %}
+                            {% if is_author %}
+                                <td class="text-end">
+                                    <a href="{% url 'card_edit' card.pk %}" class="btn btn-outline-primary btn-sm">Изменить</a>
+                                    <a href="{% url 'card_delete' card.pk %}" class="btn btn-outline-danger btn-sm">Удалить</a>
+                                </td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div class="alert alert-secondary">В этом курсе пока нет карточек.</div>
+{% endif %}
+
+<a href="{% url 'course_list' %}" class="btn btn-link ps-0 mt-3">&larr; К списку курсов</a>
+{% endblock %}
