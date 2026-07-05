@@ -8,9 +8,7 @@
         <h1 class="h2 mb-1">{{ course.title }}</h1>
         <p class="text-muted mb-0">
             Автор: {{ course.author.username }} ·
-            {{ course.cards.count }} карточек ·
-            {{ course.seconds_per_word }} сек на слово ·
-            ~{{ course.estimated_minutes }} мин
+            {{ course.cards.count }} карточек
         </p>
     </div>
     {% if is_author %}
@@ -22,10 +20,25 @@
 </div>
 
 {% if user.role == 'student' %}
+    {% if enrollment and enrollment.status != 'abandoned' %}
+        <div class="mb-2" style="max-width: 24rem;">
+            <div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1" style="height: 8px;">
+                    <div class="progress-bar bg-success" style="width: {{ enrollment.progress_percent }}%"></div>
+                </div>
+                <small class="text-muted text-nowrap">выучено {{ enrollment.learned_progress_count }} из {{ enrollment.total_progress_count }}</small>
+            </div>
+        </div>
+    {% endif %}
     <div class="mb-3">
         {% if enrollment and enrollment.status != 'abandoned' %}
             <span class="badge {% if enrollment.status == 'completed' %}bg-success{% else %}bg-primary{% endif %} fs-6 me-2">{{ enrollment.get_status_display }}</span>
-            <a href="{% url 'enrollment_settings' enrollment.pk %}" class="btn btn-outline-primary btn-sm">Настройки</a>
+            {% if enrollment.status == 'active' and course.cards.all %}
+                <a href="{% url 'train' course.pk %}" class="btn btn-success btn-sm">Учить</a>
+            {% endif %}
+            {% if enrollment.status == 'active' %}
+                <a href="{% url 'enrollment_leave' enrollment.pk %}" class="btn btn-outline-danger btn-sm">Покинуть курс</a>
+            {% endif %}
         {% else %}
             <form method="post" action="{% url 'enroll' course.pk %}" class="d-inline">
                 {% csrf_token %}

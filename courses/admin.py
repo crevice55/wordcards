@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Card, Course, Enrollment
+from .models import Card, CardProgress, Course, Enrollment
 
 
 class CardInline(admin.TabularInline):
@@ -10,7 +10,7 @@ class CardInline(admin.TabularInline):
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ('title', 'author', 'seconds_per_word', 'created_at', 'updated_at')
+    list_display = ('title', 'author', 'created_at', 'updated_at')
     list_filter = ('author',)
     search_fields = ('title', 'description')
     inlines = [CardInline]
@@ -25,6 +25,13 @@ class CardAdmin(admin.ModelAdmin):
 
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
-    list_display = ('student', 'course', 'status', 'seconds_per_word', 'enrolled_at')
+    list_display = ('student', 'course', 'status', 'enrolled_at')
     list_filter = ('status', 'course')
     search_fields = ('student__username', 'course__title')
+
+
+@admin.register(CardProgress)
+class CardProgressAdmin(admin.ModelAdmin):
+    list_display = ('enrollment', 'card', 'direction', 'level', 'last_answered_at')
+    list_filter = ('level', 'direction', 'enrollment__course')
+    search_fields = ('card__word', 'enrollment__student__username')

@@ -1,10 +1,13 @@
+import random
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count
-from django.shortcuts import get_object_or_404, redirect
+from django.db.models import Count, F
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView, DeleteView, DetailView, ListView, UpdateView,
@@ -12,8 +15,8 @@ from django.views.generic import (
 
 from accounts.models import User
 
-from .forms import CardForm, CourseForm, EnrollmentSettingsForm
-from .models import Card, Course, Enrollment
+from .forms import CardForm, CourseForm
+from .models import Card, CardProgress, Course, Enrollment
 
 
 class CreatorRequiredMixin(UserPassesTestMixin):
@@ -120,13 +123,11 @@ def enroll(request, pk):
     enrollment, created = Enrollment.objects.get_or_create(
         student=request.user,
         course=course,
-        defaults={'seconds_per_word': course.seconds_per_word},
     )
     if created:
         messages.success(request, f'Вы записаны на курс «{course.title}».')
     elif enrollment.status == Enrollment.Status.ABANDONED:
         enrollment.status = Enrollment.Status.ACTIVE
-        enrollment.seconds_per_word = course.seconds_per_word
         enrollment.save()
         messages.success(request, f'Вы снова записаны на курс «{course.title}».')
     else:
@@ -147,19 +148,6 @@ class MyCoursesView(LoginRequiredMixin, StudentRequiredMixin, ListView):
         )
 
 
-class EnrollmentSettingsView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, UpdateView):
-    model = Enrollment
-    form_class = EnrollmentSettingsForm
-    template_name = 'courses/enrollment_settings.html'
-
-    def form_valid(self, form):
-        messages.success(self.request, 'Настройки сохранены.')
-        return super().form_valid(form)
-
-    def get_success_url(self):
-        return reverse('my_courses')
-
-
 class EnrollmentLeaveView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, UpdateView):
     """Подтверждение и выход с курса: статус меняется на «прерван», запись не удаляется."""
 
@@ -175,6 +163,247 @@ class EnrollmentLeaveView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, Upda
 
     def get_success_url(self):
         return reverse('my_courses')
+
+
+# --- Тренировка (система Лейтнера, двустороннее заучивание) ---
+# Единица заучивания — объект CardProgress (карточка + направление).
+# Состояние сессии в request.session под ключом training_<enrollment_id>:
+# {'v': 2, 'queue': [id объектов прогресса, первый — текущий вопрос],
+#  'cards': {str(progress_id): {'streak': верных подряд, 'errors': ошибок}},
+#  'learned': int, 'total': int, 'correct': int, 'wrong': int,
+#  'last': результат последнего ответа, 'done': bool, 'course_completed': bool}.
+# Объект усвоен после LEARNED_STREAK верных подряд; уровень Лейтнера
+# обновляется один раз по итогам сессии (без ошибок +1, иначе 0), после чего
+# проверяется завершение курса: все объекты прогресса записи на уровне 5.
+
+SESSION_SIZE = 10
+LEARNED_STREAK = 2
+STATE_VERSION = 2
+
+
+def _training_key(enrollment):
+    return f'training_{enrollment.pk}'
+
+
+def _get_training_enrollment(request, course):
+    if not request.user.is_authenticated or request.user.role != User.Role.STUDENT:
+        raise PermissionDenied('Тренировка доступна только ученикам.')
+    # completed допускается, чтобы показать итоги сессии, завершившей курс
+    enrollment = Enrollment.objects.filter(
+        student=request.user, course=course,
+        status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+    ).first()
+    if enrollment is None:
+        raise PermissionDenied('Тренировка доступна только по активной записи на курс.')
+    return enrollment
+
+
+def _question_for(progress):
+    """Возвращает (подсказка-вопрос, правильный ответ, поле для вариантов)."""
+    card = progress.card
+    if progress.direction == CardProgress.Direction.WORD_TO_TRANSLATION:
+        return card.word, card.translation, 'translation'
+    return card.translation, card.word, 'word'
+
+
+def _build_choices(course, progress):
+    prompt, answer, field = _question_for(progress)
+    others = list(
+        course.cards
+        .exclude(pk=progress.card_id)
+        .exclude(**{field: answer})
+        .values_list(field, flat=True)
+        .distinct()
+    )
+    choices = random.sample(others, min(3, len(others))) + [answer]
+    random.shuffle(choices)
+    return choices
+
+
+def _start_session(course, enrollment):
+    """Отбирает до SESSION_SIZE объектов прогресса (карточка + направление):
+    наименьший уровень, дольше не показывались; уровень 5 не участвует."""
+    card_ids = list(course.cards.values_list('id', flat=True))
+    if not card_ids:
+        return None
+    existing = set(
+        CardProgress.objects.filter(enrollment=enrollment).values_list('card_id', 'direction')
+    )
+    CardProgress.objects.bulk_create(
+        CardProgress(enrollment=enrollment, card_id=card_id, direction=direction)
+        for card_id in card_ids
+        for direction in CardProgress.Direction.values
+        if (card_id, direction) not in existing
+    )
+    selected = list(
+        CardProgress.objects
+        .filter(enrollment=enrollment, card__course=course, level__lt=CardProgress.MAX_LEVEL)
+        .order_by('level', F('last_answered_at').asc(nulls_first=True))
+        .values_list('id', flat=True)[:SESSION_SIZE]
+    )
+    if not selected:
+        return None
+    random.shuffle(selected)
+    return {
+        'v': STATE_VERSION,
+        'queue': selected,
+        'cards': {str(progress_id): {'streak': 0, 'errors': 0} for progress_id in selected},
+        'learned': 0,
+        'total': len(selected),
+        'correct': 0,
+        'wrong': 0,
+        'done': False,
+        'course_completed': False,
+    }
+
+
+def _finish_session(enrollment, state):
+    """Итог сессии: усвоен без ошибок — уровень +1, была ошибка — уровень 0.
+    Затем проверка завершения курса; возвращает True, если курс завершён."""
+    for progress_id, info in state['cards'].items():
+        progress = CardProgress.objects.filter(
+            pk=int(progress_id), enrollment=enrollment,
+        ).first()
+        if progress is None:
+            continue
+        if info['errors']:
+            progress.level = 0
+        else:
+            progress.level = min(progress.level + 1, CardProgress.MAX_LEVEL)
+        progress.save(update_fields=['level'])
+
+    total = enrollment.total_progress_count
+    if (
+        enrollment.status == Enrollment.Status.ACTIVE
+        and total
+        and enrollment.learned_progress_count >= total
+    ):
+        enrollment.status = Enrollment.Status.COMPLETED
+        enrollment.save(update_fields=['status'])
+        return True
+    return False
+
+
+@login_required
+def train(request, pk):
+    course = get_object_or_404(Course, pk=pk)
+    enrollment = _get_training_enrollment(request, course)
+    key = _training_key(enrollment)
+    state = request.session.get(key)
+    if state is not None and state.get('v') != STATE_VERSION:
+        state = None  # сессия из старой версии кода
+
+    if state is None:
+        state = _start_session(course, enrollment)
+        if state is None:
+            if course.cards.exists():
+                messages.success(request, 'Все карточки этого курса уже на максимальном уровне. Отличная работа!')
+            else:
+                messages.info(request, 'В этом курсе пока нет карточек для тренировки.')
+            return redirect('course_detail', pk=course.pk)
+        request.session[key] = state
+
+    if state.get('done'):
+        context = {
+            'course': course,
+            'correct': state['correct'],
+            'wrong': state['wrong'],
+            'total': state['total'],
+            'course_completed': state.get('course_completed', False),
+        }
+        del request.session[key]
+        return render(request, 'courses/train_summary.html', context)
+
+    progress = get_object_or_404(
+        CardProgress.objects.select_related('card'),
+        pk=state['queue'][0], enrollment=enrollment,
+    )
+    prompt, _answer, _field = _question_for(progress)
+    return render(request, 'courses/train_question.html', {
+        'course': course,
+        'progress': progress,
+        'prompt': prompt,
+        'is_word_to_translation': progress.direction == CardProgress.Direction.WORD_TO_TRANSLATION,
+        'choices': _build_choices(course, progress),
+        'learned': state['learned'],
+        'total': state['total'],
+    })
+
+
+@login_required
+@require_POST
+def train_answer(request, pk):
+    course = get_object_or_404(Course, pk=pk)
+    enrollment = _get_training_enrollment(request, course)
+    key = _training_key(enrollment)
+    state = request.session.get(key)
+    if state is None or state.get('v') != STATE_VERSION or state.get('done'):
+        return redirect('train', pk=course.pk)
+
+    try:
+        progress_id = int(request.POST.get('progress_id', 0))
+    except ValueError:
+        progress_id = 0
+    # Устаревшая форма (повторная отправка, другая вкладка) — просто к текущему вопросу
+    if progress_id != state['queue'][0]:
+        return redirect('train', pk=course.pk)
+
+    progress = get_object_or_404(
+        CardProgress.objects.select_related('card'),
+        pk=progress_id, enrollment=enrollment,
+    )
+    prompt, answer, _field = _question_for(progress)
+    chosen = request.POST.get('choice', '')
+    was_correct = chosen == answer
+
+    progress.last_answered_at = timezone.now()
+    progress.save(update_fields=['last_answered_at'])
+
+    info = state['cards'][str(progress_id)]
+    state['queue'].pop(0)
+    if was_correct:
+        state['correct'] += 1
+        info['streak'] += 1
+        if info['streak'] >= LEARNED_STREAK:
+            state['learned'] += 1  # усвоен, в очередь не возвращается
+        else:
+            state['queue'].append(progress_id)
+    else:
+        state['wrong'] += 1
+        info['streak'] = 0
+        info['errors'] += 1
+        # возврат через 2-3 позиции
+        position = min(random.randint(2, 3), len(state['queue']))
+        state['queue'].insert(position, progress_id)
+
+    state['last'] = {
+        'word': prompt,
+        'chosen': chosen,
+        'answer': answer,
+        'was_correct': was_correct,
+        # порядок вариантов с формы — чтобы показать их же с подсветкой
+        'choices': request.POST.getlist('choices'),
+    }
+    if not state['queue']:
+        state['done'] = True
+        state['course_completed'] = _finish_session(enrollment, state)
+    request.session[key] = state
+    return redirect('train_feedback', pk=course.pk)
+
+
+@login_required
+def train_feedback(request, pk):
+    course = get_object_or_404(Course, pk=pk)
+    enrollment = _get_training_enrollment(request, course)
+    state = request.session.get(_training_key(enrollment))
+    if state is None or state.get('v') != STATE_VERSION or not state.get('last'):
+        return redirect('train', pk=course.pk)
+    return render(request, 'courses/train_feedback.html', {
+        'course': course,
+        'last': state['last'],
+        'learned': state['learned'],
+        'total': state['total'],
+    })
 
 
 class CardCreateView(LoginRequiredMixin, CourseAuthorRequiredMixin, CreateView):

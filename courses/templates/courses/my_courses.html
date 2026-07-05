@@ -15,7 +15,7 @@
                         <th>Автор</th>
                         <th class="text-center">Статус</th>
                         <th class="text-center">Карточек</th>
-                        <th class="text-center">Время прохождения</th>
+                        <th style="min-width: 10rem;">Выучено</th>
                         <th class="text-end">Действия</th>
                     </tr>
                 </thead>
@@ -30,8 +30,13 @@
                                 </span>
                             </td>
                             <td class="text-center">{{ enrollment.card_count }}</td>
-                            <td class="text-center">
-                                {% if enrollment.card_count %}~{{ enrollment.estimated_minutes }} мин{% else %}—{% endif %}
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress flex-grow-1" style="height: 8px;">
+                                        <div class="progress-bar bg-success" style="width: {{ enrollment.progress_percent }}%"></div>
+                                    </div>
+                                    <small class="text-muted text-nowrap">{{ enrollment.learned_progress_count }}/{{ enrollment.total_progress_count }}</small>
+                                </div>
                             </td>
                             <td class="text-end">
                                 {% if enrollment.status == 'abandoned' %}
@@ -39,8 +44,8 @@
                                         {% csrf_token %}
                                         <button type="submit" class="btn btn-outline-primary btn-sm">Записаться снова</button>
                                     </form>
-                                {% else %}
-                                    <a href="{% url 'enrollment_settings' enrollment.pk %}" class="btn btn-outline-primary btn-sm">Настройки</a>
+                                {% elif enrollment.status == 'active' and enrollment.card_count %}
+                                    <a href="{% url 'train' enrollment.course.pk %}" class="btn btn-success btn-sm">Учить</a>
                                 {% endif %}
                             </td>
                         </tr>

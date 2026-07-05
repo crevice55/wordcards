@@ -33,15 +33,6 @@
                             <div class="invalid-feedback">{{ error }}</div>
                         {% endfor %}
                     </div>
-                    <div class="mb-3">
-                        <label for="{{ form.seconds_per_word.id_for_label }}" class="form-label">Время на одно слово (секунд)</label>
-                        <input type="number" name="{{ form.seconds_per_word.html_name }}" id="{{ form.seconds_per_word.id_for_label }}"
-                               class="form-control {% if form.seconds_per_word.errors %}is-invalid{% endif %}"
-                               value="{{ form.seconds_per_word.value|default:30 }}" min="1" required>
-                        {% for error in form.seconds_per_word.errors %}
-                            <div class="invalid-feedback">{{ error }}</div>
-                        {% endfor %}
-                    </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">Сохранить</button>
                         {% if form.instance.pk %}

@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+
+{% block title %}Итоги тренировки: {{ course.title }} — WordCards{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-body p-4 text-center">
+                {% if course_completed %}
+                    <div class="display-1 mb-2">🎉</div>
+                    <h1 class="h3 mb-3">Поздравляем! Курс завершён!</h1>
+                    <p>Вы выучили все слова курса «{{ course.title }}» в обоих направлениях.</p>
+                {% else %}
+                    <h1 class="h3 mb-4">Тренировка завершена!</h1>
+                {% endif %}
+                <p class="text-muted">Курс «{{ course.title }}» · усвоено в сессии: {{ total }}</p>
+                <div class="row my-4">
+                    <div class="col">
+                        <div class="display-6 text-success">{{ correct }}</div>
+                        <div class="text-muted">верно</div>
+                    </div>
+                    <div class="col">
+                        <div class="display-6 text-danger">{{ wrong }}</div>
+                        <div class="text-muted">неверно</div>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-center gap-2">
+                    {% if not course_completed %}
+                        <a href="{% url 'train' course.pk %}" class="btn btn-primary">Учить ещё раз</a>
+                    {% endif %}
+                    <a href="{% url 'course_detail' course.pk %}" class="btn btn-outline-secondary">К курсу</a>
+                    <a href="{% url 'my_courses' %}" class="btn btn-outline-secondary">Мои курсы</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

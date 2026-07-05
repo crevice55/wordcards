@@ -19,7 +19,6 @@
                         <th>Название</th>
                         <th>Автор</th>
                         <th class="text-center">Карточек</th>
-                        <th class="text-center">Время прохождения</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -28,13 +27,6 @@
                             <td><a href="{% url 'course_detail' course.pk %}">{{ course.title }}</a></td>
                             <td>{{ course.author.username }}</td>
                             <td class="text-center">{{ course.card_count }}</td>
-                            <td class="text-center">
-                                {% if course.card_count %}
-                                    ~{{ course.estimated_minutes }} мин
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+
+{% block title %}Тренировка: {{ course.title }} — WordCards{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="text-muted">Усвоено {{ learned }} из {{ total }}</span>
+            <a href="{% url 'course_detail' course.pk %}" class="btn btn-link btn-sm pe-0">Прервать</a>
+        </div>
+        <div class="progress mb-4" style="height: 6px;">
+            <div class="progress-bar bg-success" style="width: {% widthratio learned total 100 %}%"></div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body p-4 text-center">
+                <p class="mb-1 fw-bold {% if last.was_correct %}text-success{% else %}text-danger{% endif %}">
+                    {% if last.was_correct %}Верно!{% else %}Неверно{% endif %}
+                </p>
+                <h1 class="display-6 mb-4">{{ last.word }}</h1>
+                {% for choice in last.choices %}
+                    <button type="button" disabled
+                            class="btn w-100 mb-2 {% if choice == last.answer %}btn-success{% elif choice == last.chosen %}btn-danger{% else %}btn-outline-secondary{% endif %}">
+                        {{ choice }}
+                    </button>
+                {% empty %}
+                    <div class="alert {% if last.was_correct %}alert-success{% else %}alert-danger{% endif %}">
+                        Правильный ответ: <strong>{{ last.answer }}</strong>
+                    </div>
+                {% endfor %}
+                {% if last.was_correct %}
+                    <div class="progress mt-3" style="height: 4px;" title="Переход к следующей карточке">
+                        <div class="progress-bar bg-success" id="advance-bar" style="width: 0%; transition: none;"></div>
+                    </div>
+                    <noscript>
+                        <a href="{% url 'train' course.pk %}" class="btn btn-primary w-100 mt-3">Далее</a>
+                    </noscript>
+                {% else %}
+                    <a href="{% url 'train' course.pk %}" class="btn btn-primary w-100 mt-3">Далее</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if last.was_correct %}
+<script>
+(function () {
+    var delay = 700;
+    var nextUrl = "{% url 'train' course.pk %}";
+    var bar = document.getElementById('advance-bar');
+    var start = performance.now();
+
+    function tick(now) {
+        var elapsed = now - start;
+        bar.style.width = Math.min(100, elapsed / delay * 100) + '%';
+        if (elapsed >= delay) {
+            window.location.href = nextUrl;
+            return;
+        }
+        requestAnimationFrame(tick);
+    }
+
+    requestAnimationFrame(tick);
+})();
+</script>
+{% endif %}
+{% endblock %}

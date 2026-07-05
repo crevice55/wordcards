@@ -1,6 +1,5 @@
-import math
-
 from django.conf import settings
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.urls import reverse
 
@@ -14,7 +13,6 @@ class Course(models.Model):
         related_name='courses',
         verbose_name='Автор',
     )
-    seconds_per_word = models.PositiveIntegerField('Время на одно слово (сек)', default=30)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Изменён', auto_now=True)
 
@@ -28,14 +26,6 @@ class Course(models.Model):
 
     def get_absolute_url(self):
         return reverse('course_detail', kwargs={'pk': self.pk})
-
-    @property
-    def estimated_minutes(self):
-        # Uses the annotated value when the queryset provides it, to avoid N+1 in lists
-        count = getattr(self, 'card_count', None)
-        if count is None:
-            count = self.cards.count()
-        return math.ceil(count * self.seconds_per_word / 60)
 
 
 class Enrollment(models.Model):
@@ -56,7 +46,6 @@ class Enrollment(models.Model):
         related_name='enrollments',
         verbose_name='Курс',
     )
-    seconds_per_word = models.PositiveIntegerField('Время на одно слово (сек)')
     status = models.CharField(
         'Статус',
         max_length=10,
@@ -77,11 +66,66 @@ class Enrollment(models.Model):
         return f'{self.student.username} — {self.course.title}'
 
     @property
-    def estimated_minutes(self):
-        count = getattr(self, 'card_count', None)
-        if count is None:
-            count = self.course.cards.count()
-        return math.ceil(count * self.seconds_per_word / 60)
+    def total_progress_count(self):
+        """Всего объектов прогресса: карточки × 2 направления."""
+        return self.course.cards.count() * 2
+
+    @property
+    def learned_progress_count(self):
+        return self.card_progresses.filter(level=CardProgress.MAX_LEVEL).count()
+
+    @property
+    def progress_percent(self):
+        total = self.total_progress_count
+        if not total:
+            return 0
+        return round(100 * self.learned_progress_count / total)
+
+
+class CardProgress(models.Model):
+    MAX_LEVEL = 5
+
+    class Direction(models.TextChoices):
+        WORD_TO_TRANSLATION = 'word_to_translation', 'Слово → перевод'
+        TRANSLATION_TO_WORD = 'translation_to_word', 'Перевод → слово'
+
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name='card_progresses',
+        verbose_name='Запись',
+    )
+    card = models.ForeignKey(
+        'Card',
+        on_delete=models.CASCADE,
+        related_name='progresses',
+        verbose_name='Карточка',
+    )
+    direction = models.CharField(
+        'Направление',
+        max_length=20,
+        choices=Direction.choices,
+        default=Direction.WORD_TO_TRANSLATION,
+    )
+    level = models.PositiveSmallIntegerField(
+        'Уровень',
+        default=0,
+        validators=[MaxValueValidator(MAX_LEVEL)],
+    )
+    last_answered_at = models.DateTimeField('Последний ответ', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Прогресс по карточке'
+        verbose_name_plural = 'Прогресс по карточкам'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['enrollment', 'card', 'direction'],
+                name='unique_enrollment_card_direction',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.enrollment} — {self.card.word} ({self.get_direction_display()}): {self.level}'
 
 
 class Card(models.Model):
