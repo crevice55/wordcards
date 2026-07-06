@@ -36,7 +36,9 @@
                         <a href="{% url 'train' course.pk %}" class="btn btn-primary w-100 mt-3">Далее</a>
                     </noscript>
                 {% else %}
-                    <a href="{% url 'train' course.pk %}" class="btn btn-primary w-100 mt-3">Далее</a>
+                    <a href="{% url 'train' course.pk %}" class="btn btn-primary w-100 mt-3">
+                    {% if session_done %}К итогам{% else %}Далее{% endif %}
+                </a>
                 {% endif %}
             </div>
         </div>

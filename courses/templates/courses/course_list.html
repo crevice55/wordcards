@@ -19,6 +19,9 @@
                         <th>Название</th>
                         <th>Автор</th>
                         <th class="text-center">Карточек</th>
+                        {% if user.role == 'student' %}
+                            <th class="text-center">Статус</th>
+                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -27,6 +30,17 @@
                             <td><a href="{% url 'course_detail' course.pk %}">{{ course.title }}</a></td>
                             <td>{{ course.author.username }}</td>
                             <td class="text-center">{{ course.card_count }}</td>
+                            {% if user.role == 'student' %}
+                                <td class="text-center">
+                                    {% if course.enrollment %}
+                                        <span class="badge {% if course.enrollment.status == 'active' %}bg-primary{% elif course.enrollment.status == 'completed' %}bg-success{% else %}bg-secondary{% endif %}">
+                                            {{ course.enrollment.get_status_display }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted">Не записан</span>
+                                    {% endif %}
+                                </td>
+                            {% endif %}
                         </tr>
                     {% endfor %}
                 </tbody>

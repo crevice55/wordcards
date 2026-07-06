@@ -72,7 +72,7 @@ class Enrollment(models.Model):
 
     @property
     def learned_progress_count(self):
-        return self.card_progresses.filter(level=CardProgress.MAX_LEVEL).count()
+        return self.card_progresses.filter(level__gte=CardProgress.MAX_LEVEL).count()
 
     @property
     def progress_percent(self):
@@ -83,7 +83,7 @@ class Enrollment(models.Model):
 
 
 class CardProgress(models.Model):
-    MAX_LEVEL = 5
+    MAX_LEVEL = 3
 
     class Direction(models.TextChoices):
         WORD_TO_TRANSLATION = 'word_to_translation', 'Слово → перевод'
