@@ -53,6 +53,8 @@ class Enrollment(models.Model):
         default=Status.ACTIVE,
     )
     enrolled_at = models.DateTimeField('Дата записи', auto_now_add=True)
+    answers_correct = models.PositiveIntegerField('Верных ответов', default=0)
+    answers_wrong = models.PositiveIntegerField('Неверных ответов', default=0)
 
     class Meta:
         verbose_name = 'Запись на курс'
@@ -75,15 +77,35 @@ class Enrollment(models.Model):
         return self.card_progresses.filter(level__gte=CardProgress.MAX_LEVEL).count()
 
     @property
+    def learned_cards_count(self):
+        """Полностью выученные карточки: оба направления на MAX_LEVEL."""
+        return (
+            self.card_progresses
+            .filter(level__gte=CardProgress.MAX_LEVEL)
+            .values('card')
+            .annotate(directions=models.Count('id'))
+            .filter(directions=len(CardProgress.Direction.values))
+            .count()
+        )
+
+    @property
     def progress_percent(self):
-        total = self.total_progress_count
+        """Прогресс курса по карточкам: выучена, когда оба направления на максимуме."""
+        total = self.course.cards.count()
         if not total:
             return 0
-        return round(100 * self.learned_progress_count / total)
+        return round(100 * self.learned_cards_count / total)
+
+    @property
+    def accuracy_percent(self):
+        total = self.answers_correct + self.answers_wrong
+        if not total:
+            return 0
+        return round(100 * self.answers_correct / total)
 
 
 class CardProgress(models.Model):
-    MAX_LEVEL = 3
+    MAX_LEVEL = 2
 
     class Direction(models.TextChoices):
         WORD_TO_TRANSLATION = 'word_to_translation', 'Слово → перевод'

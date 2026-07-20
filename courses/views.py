@@ -178,22 +178,21 @@ class EnrollmentLeaveView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, Upda
 
 # --- Тренировка (система Лейтнера, двустороннее заучивание) ---
 # Единица заучивания — объект CardProgress (карточка + направление).
-# Сессия длится до завершения курса (или пока ученик не прервёт её):
-# внутри неё порции по SESSION_SIZE объектов; когда порция усвоена,
-# уровни обновляются (_finish_session), проверяется завершение курса,
-# и если курс не завершён — без сводки подгружается следующая порция.
-# Состояние сессии в request.session под ключом training_<enrollment_id>:
-# {'v': 3, 'queue': [id объектов прогресса, первый — текущий вопрос],
-#  'cards': {str(progress_id): {'streak': верных подряд, 'errors': ошибок}},
-#  'learned': int, 'total': int — по текущей порции,
-#  'learned_total': усвоено за всю сессию, 'correct': int, 'wrong': int,
+# Тренировка сквозная на весь курс: в очередь попадают все направления
+# с уровнем < MAX_LEVEL. Направление «проходит заход» после LEARNED_STREAK
+# верных подряд: уровень сохраняется в БД сразу (без ошибок в заходе — +1,
+# была ошибка — 0); достигшее MAX_LEVEL фиксируется и больше не предлагается,
+# остальные возвращаются в конец очереди. Уровни живут в БД, поэтому при
+# новом входе тренировка продолжается с текущего места. Неверный ответ —
+# сброс счётчика верных и возврат через 2–3 позиции. Счётчики ответов
+# копятся в Enrollment.answers_correct / answers_wrong (переживают выход).
+# Состояние текущего прохода в request.session под ключом training_<enrollment_id>:
+# {'v': 4, 'queue': [id объектов прогресса, первый — текущий вопрос],
+#  'cards': {str(progress_id): {'streak': верных подряд, 'errors': ошибок в заходе}},
 #  'last': результат последнего ответа, 'done': bool, 'course_completed': bool}.
-# Объект усвоен после LEARNED_STREAK верных подряд; уровень Лейтнера
-# обновляется один раз по итогам порции (без ошибок +1, иначе 0).
 
-SESSION_SIZE = 10
 LEARNED_STREAK = 2
-STATE_VERSION = 3
+STATE_VERSION = 4
 
 
 def _training_key(enrollment):
@@ -235,9 +234,9 @@ def _build_choices(course, progress):
     return choices
 
 
-def _start_session(course, enrollment):
-    """Отбирает до SESSION_SIZE объектов прогресса (карточка + направление):
-    наименьший уровень, дольше не показывались; уровень 5 не участвует."""
+def _build_queue(course, enrollment):
+    """Собирает очередь из ВСЕХ направлений курса с уровнем < MAX_LEVEL
+    (недостающие объекты прогресса создаются)."""
     card_ids = list(course.cards.values_list('id', flat=True))
     if not card_ids:
         return None
@@ -253,8 +252,7 @@ def _start_session(course, enrollment):
     selected = list(
         CardProgress.objects
         .filter(enrollment=enrollment, card__course=course, level__lt=CardProgress.MAX_LEVEL)
-        .order_by('level', F('last_answered_at').asc(nulls_first=True))
-        .values_list('id', flat=True)[:SESSION_SIZE]
+        .values_list('id', flat=True)
     )
     if not selected:
         return None
@@ -263,11 +261,6 @@ def _start_session(course, enrollment):
         'v': STATE_VERSION,
         'queue': selected,
         'cards': {str(progress_id): {'streak': 0, 'errors': 0} for progress_id in selected},
-        'learned': 0,
-        'total': len(selected),
-        'learned_total': 0,
-        'correct': 0,
-        'wrong': 0,
         'done': False,
         'course_completed': False,
     }
@@ -275,7 +268,7 @@ def _start_session(course, enrollment):
 
 def _check_course_completed(enrollment):
     """Курс завершён, когда все объекты прогресса записи (карточки × 2)
-    на уровне 5. Возвращает True, если статус переведён в completed."""
+    на уровне MAX_LEVEL. Возвращает True, если статус переведён в completed."""
     total = enrollment.total_progress_count
     if (
         enrollment.status == Enrollment.Status.ACTIVE
@@ -288,24 +281,6 @@ def _check_course_completed(enrollment):
     return False
 
 
-def _finish_session(enrollment, state):
-    """Итог сессии: усвоен без ошибок — уровень +1, была ошибка — уровень 0.
-    Затем проверка завершения курса; возвращает True, если курс завершён."""
-    for progress_id, info in state['cards'].items():
-        progress = CardProgress.objects.filter(
-            pk=int(progress_id), enrollment=enrollment,
-        ).first()
-        if progress is None:
-            continue
-        if info['errors']:
-            progress.level = 0
-        else:
-            progress.level = min(progress.level + 1, CardProgress.MAX_LEVEL)
-        progress.save(update_fields=['level'])
-
-    return _check_course_completed(enrollment)
-
-
 @login_required
 def train(request, pk):
     course = get_object_or_404(Course, pk=pk)
@@ -313,13 +288,13 @@ def train(request, pk):
     key = _training_key(enrollment)
     state = request.session.get(key)
     if state is not None and state.get('v') != STATE_VERSION:
-        state = None  # сессия из старой версии кода
+        state = None  # состояние из старой версии кода
 
     if state is None:
-        state = _start_session(course, enrollment)
+        state = _build_queue(course, enrollment)
         if state is None:
             if course.cards.exists():
-                # уровни могли достичь 5 вне обычного финала сессии — доводим статус
+                # уровни могли достичь максимума вне обычного финала сессии — доводим статус
                 if _check_course_completed(enrollment):
                     messages.success(request, f'Поздравляем! Курс «{course.title}» завершён.')
                 else:
@@ -332,9 +307,9 @@ def train(request, pk):
     if state.get('done'):
         context = {
             'course': course,
-            'correct': state['correct'],
-            'wrong': state['wrong'],
-            'total': state['learned_total'],
+            'cards_learned': enrollment.learned_cards_count,
+            'cards_total': course.cards.count(),
+            'accuracy': enrollment.accuracy_percent,
             'course_completed': state.get('course_completed', False),
         }
         del request.session[key]
@@ -351,8 +326,8 @@ def train(request, pk):
         'prompt': prompt,
         'is_word_to_translation': progress.direction == CardProgress.Direction.WORD_TO_TRANSLATION,
         'choices': _build_choices(course, progress),
-        'learned': state['learned'],
-        'total': state['total'],
+        'learned': enrollment.learned_progress_count,
+        'total': enrollment.total_progress_count,
     })
 
 
@@ -383,24 +358,32 @@ def train_answer(request, pk):
     was_correct = chosen == answer
 
     progress.last_answered_at = timezone.now()
-    progress.save(update_fields=['last_answered_at'])
+    counter = 'answers_correct' if was_correct else 'answers_wrong'
+    Enrollment.objects.filter(pk=enrollment.pk).update(**{counter: F(counter) + 1})
 
     info = state['cards'][str(progress_id)]
     state['queue'].pop(0)
     if was_correct:
-        state['correct'] += 1
         info['streak'] += 1
         if info['streak'] >= LEARNED_STREAK:
-            state['learned'] += 1  # усвоен, в очередь не возвращается
+            # заход по направлению завершён — фиксируем уровень сразу
+            progress.level = 0 if info['errors'] else min(progress.level + 1, CardProgress.MAX_LEVEL)
+            if progress.level < CardProgress.MAX_LEVEL:
+                # ещё не выучено — новый заход с чистым счётом, в конец очереди
+                info['streak'] = 0
+                info['errors'] = 0
+                state['queue'].append(progress_id)
+            progress.save(update_fields=['level', 'last_answered_at'])
         else:
             state['queue'].append(progress_id)
+            progress.save(update_fields=['last_answered_at'])
     else:
-        state['wrong'] += 1
         info['streak'] = 0
         info['errors'] += 1
         # возврат через 2-3 позиции
         position = min(random.randint(2, 3), len(state['queue']))
         state['queue'].insert(position, progress_id)
+        progress.save(update_fields=['last_answered_at'])
 
     state['last'] = {
         'word': prompt,
@@ -409,25 +392,20 @@ def train_answer(request, pk):
         'was_correct': was_correct,
         # порядок вариантов с формы — чтобы показать их же с подсветкой
         'choices': request.POST.getlist('choices'),
-        # снимок прогресса порции для страницы результата (до подгрузки следующей)
-        'learned': state['learned'],
-        'total': state['total'],
     }
     if not state['queue']:
-        # порция усвоена: обновляем уровни и либо завершаем курс, либо продолжаем
-        state['learned_total'] += state['learned']
-        if _finish_session(enrollment, state):
+        # все направления на MAX_LEVEL: либо курс завершён, либо
+        # в курсе появились новые карточки — собираем очередь заново
+        if _check_course_completed(enrollment):
             state['done'] = True
             state['course_completed'] = True
         else:
-            next_batch = _start_session(course, enrollment)
-            if next_batch is None:
+            rebuilt = _build_queue(course, enrollment)
+            if rebuilt is None:
                 state['done'] = True  # подстраховка: тренировать больше нечего
             else:
-                state['queue'] = next_batch['queue']
-                state['cards'] = next_batch['cards']
-                state['learned'] = 0
-                state['total'] = next_batch['total']
+                state['queue'] = rebuilt['queue']
+                state['cards'] = rebuilt['cards']
     request.session[key] = state
     return redirect('train_feedback', pk=course.pk)
 
@@ -439,12 +417,11 @@ def train_feedback(request, pk):
     state = request.session.get(_training_key(enrollment))
     if state is None or state.get('v') != STATE_VERSION or not state.get('last'):
         return redirect('train', pk=course.pk)
-    last = state['last']
     return render(request, 'courses/train_feedback.html', {
         'course': course,
-        'last': last,
-        'learned': last.get('learned', state['learned']),
-        'total': last.get('total', state['total']),
+        'last': state['last'],
+        'learned': enrollment.learned_progress_count,
+        'total': enrollment.total_progress_count,
         'session_done': state.get('done', False),
     })
 
