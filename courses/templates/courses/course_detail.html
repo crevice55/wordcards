@@ -48,6 +48,35 @@
     </div>
 {% endif %}
 
+{% if is_author %}
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-md-4">
+            <div class="card shadow-sm text-center h-100">
+                <div class="card-body py-3">
+                    <div class="h3 mb-0">{{ enrolled_count }}</div>
+                    <div class="text-muted small">записано учеников</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4">
+            <div class="card shadow-sm text-center h-100">
+                <div class="card-body py-3">
+                    <div class="h3 mb-0">{{ completed_students_count }}</div>
+                    <div class="text-muted small">прошли курс хотя бы раз</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4">
+            <div class="card shadow-sm text-center h-100">
+                <div class="card-body py-3">
+                    <div class="h3 mb-0">{{ total_completions }}</div>
+                    <div class="text-muted small">всего прохождений (с повторными)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
 {% if course.description %}
     <p class="lead">{{ course.description|linebreaksbr }}</p>
 {% endif %}

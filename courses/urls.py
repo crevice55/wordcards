@@ -5,11 +5,13 @@ from . import views
 urlpatterns = [
     path('', views.CourseListView.as_view(), name='course_list'),
     path('my/', views.MyCoursesView.as_view(), name='my_courses'),
+    path('stats/', views.StudentStatsView.as_view(), name='student_stats'),
     path('create/', views.CourseCreateView.as_view(), name='course_create'),
     path('<int:pk>/enroll/', views.enroll, name='enroll'),
     path('<int:pk>/train/', views.train, name='train'),
     path('<int:pk>/train/answer/', views.train_answer, name='train_answer'),
     path('<int:pk>/train/feedback/', views.train_feedback, name='train_feedback'),
+    path('<int:pk>/restart/', views.course_restart, name='course_restart'),
     path('enrollments/<int:pk>/leave/', views.EnrollmentLeaveView.as_view(), name='enrollment_leave'),
     path('<int:pk>/', views.CourseDetailView.as_view(), name='course_detail'),
     path('<int:pk>/edit/', views.CourseUpdateView.as_view(), name='course_edit'),

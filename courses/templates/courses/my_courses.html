@@ -39,13 +39,21 @@
                                 </div>
                             </td>
                             <td class="text-end">
-                                {% if enrollment.status == 'abandoned' %}
-                                    <form method="post" action="{% url 'enroll' enrollment.course.pk %}" class="d-inline">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-outline-primary btn-sm">Записаться снова</button>
-                                    </form>
-                                {% elif enrollment.status == 'active' and enrollment.card_count %}
-                                    <a href="{% url 'train' enrollment.course.pk %}" class="btn btn-success btn-sm">Учить</a>
+                                {% if enrollment.card_count %}
+                                    {% if enrollment.status == 'active' %}
+                                        {% if enrollment.progressed_count %}
+                                            <a href="{% url 'train' enrollment.course.pk %}" class="btn btn-success btn-sm">Продолжить</a>
+                                        {% else %}
+                                            <a href="{% url 'train' enrollment.course.pk %}" class="btn btn-success btn-sm">Начать</a>
+                                        {% endif %}
+                                    {% elif enrollment.status == 'abandoned' %}
+                                        <form method="post" action="{% url 'course_restart' enrollment.course.pk %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-outline-primary btn-sm">Начать</button>
+                                        </form>
+                                    {% elif enrollment.status == 'completed' %}
+                                        <a href="{% url 'course_restart' enrollment.course.pk %}" class="btn btn-outline-primary btn-sm">Пройти заново</a>
+                                    {% endif %}
                                 {% endif %}
                             </td>
                         </tr>

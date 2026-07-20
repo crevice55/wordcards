@@ -55,6 +55,8 @@ class Enrollment(models.Model):
     enrolled_at = models.DateTimeField('Дата записи', auto_now_add=True)
     answers_correct = models.PositiveIntegerField('Верных ответов', default=0)
     answers_wrong = models.PositiveIntegerField('Неверных ответов', default=0)
+    completions_count = models.PositiveIntegerField('Успешных прохождений', default=0)
+    ever_completed = models.BooleanField('Пройден хотя бы раз', default=False)
 
     class Meta:
         verbose_name = 'Запись на курс'
@@ -71,6 +73,11 @@ class Enrollment(models.Model):
     def total_progress_count(self):
         """Всего объектов прогресса: карточки × 2 направления."""
         return self.course.cards.count() * 2
+
+    @property
+    def has_progress(self):
+        """Есть ли хоть какой-то прогресс (хотя бы одно направление выше нуля)."""
+        return self.card_progresses.filter(level__gt=0).exists()
 
     @property
     def learned_progress_count(self):
@@ -167,3 +174,34 @@ class Card(models.Model):
 
     def __str__(self):
         return f'{self.word} — {self.translation}'
+
+
+class AnswerLog(models.Model):
+    """Лог отдельных ответов для статистики (например, за последние 7 дней).
+    Общие счётчики верно/неверно хранятся в Enrollment; здесь — по одному
+    ряду на каждый ответ, чтобы считать активность во времени."""
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='answer_logs',
+        verbose_name='Ученик',
+    )
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name='answer_logs',
+        verbose_name='Запись',
+    )
+    is_correct = models.BooleanField('Верный ответ')
+    answered_at = models.DateTimeField('Момент ответа', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Ответ (лог)'
+        verbose_name_plural = 'Ответы (лог)'
+        indexes = [
+            models.Index(fields=['student', 'answered_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.student.username} @ {self.answered_at:%Y-%m-%d %H:%M}'

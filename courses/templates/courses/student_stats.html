@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block title %}Статистика — WordCards{% endblock %}
+
+{% block content %}
+<h1 class="h2 mb-4">Моя статистика</h1>
+
+<div class="row g-3">
+    <div class="col-md-6 col-lg-3">
+        <div class="card shadow-sm text-center h-100">
+            <div class="card-body py-4">
+                <div class="display-6 mb-0">{{ active_courses }}</div>
+                <div class="text-muted">активных курсов</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card shadow-sm text-center h-100">
+            <div class="card-body py-4">
+                <div class="display-6 mb-0">{{ completed_courses }}</div>
+                <div class="text-muted">завершённых курсов</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card shadow-sm text-center h-100">
+            <div class="card-body py-4">
+                <div class="display-6 mb-0 text-success">{{ learned_words }}</div>
+                <div class="text-muted">выучено слов</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card shadow-sm text-center h-100">
+            <div class="card-body py-4">
+                <div class="display-6 mb-0">{{ answers_week }}</div>
+                <div class="text-muted">ответов за 7 дней</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<p class="text-muted small mt-3 mb-0">
+    Слово считается выученным, когда обе стороны карточки (слово → перевод и перевод → слово)
+    доведены до максимального уровня.
+</p>
+
+<a href="{% url 'course_list' %}" class="btn btn-link ps-0 mt-3">&larr; Каталог курсов</a>
+{% endblock %}

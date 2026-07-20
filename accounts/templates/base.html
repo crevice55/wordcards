@@ -16,6 +16,7 @@
                     <a class="nav-link text-white me-3" href="{% url 'course_list' %}">Курсы</a>
                     {% if user.role == 'student' %}
                         <a class="nav-link text-white me-3" href="{% url 'my_courses' %}">Мои курсы</a>
+                        <a class="nav-link text-white me-3" href="{% url 'student_stats' %}">Статистика</a>
                     {% endif %}
                     <span class="navbar-text text-white me-2">
                         {{ user.username }} ({{ user.get_role_display }})

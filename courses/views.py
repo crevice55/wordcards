@@ -1,22 +1,23 @@
 import random
+from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, F
+from django.db.models import Count, F, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.generic import (
-    CreateView, DeleteView, DetailView, ListView, UpdateView,
+    CreateView, DeleteView, DetailView, ListView, TemplateView, UpdateView,
 )
 
 from accounts.models import User
 
 from .forms import CardForm, CourseForm
-from .models import Card, CardProgress, Course, Enrollment
+from .models import AnswerLog, Card, CardProgress, Course, Enrollment
 
 
 class CreatorRequiredMixin(UserPassesTestMixin):
@@ -56,14 +57,27 @@ class CourseListView(LoginRequiredMixin, ListView):
     context_object_name = 'courses'
 
     def get_queryset(self):
-        return (
+        qs = (
             Course.objects
             .select_related('author')
             .annotate(card_count=Count('cards'))
         )
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            # SQLite LIKE/icontains не сворачивает регистр для кириллицы,
+            # поэтому сопоставляем регистронезависимо средствами Python,
+            # сохраняя queryset (аннотации, сортировку) через pk__in.
+            needle = query.lower()
+            match_ids = [
+                pk for pk, title in Course.objects.values_list('pk', 'title')
+                if needle in title.lower()
+            ]
+            qs = qs.filter(pk__in=match_ids)
+        return qs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['query'] = self.request.GET.get('q', '').strip()
         if self.request.user.role == User.Role.STUDENT:
             enrollment_by_course = {
                 enrollment.course_id: enrollment
@@ -86,6 +100,13 @@ class CourseDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         context['is_author'] = self.object.author_id == self.request.user.pk
         context['show_translations'] = self.request.user.role != User.Role.STUDENT
+        if context['is_author']:
+            enrollments = self.object.enrollments
+            context['enrolled_count'] = enrollments.count()
+            context['completed_students_count'] = enrollments.filter(ever_completed=True).count()
+            context['total_completions'] = (
+                enrollments.aggregate(total=Sum('completions_count'))['total'] or 0
+            )
         if self.request.user.role == User.Role.STUDENT:
             context['enrollment'] = Enrollment.objects.filter(
                 student=self.request.user, course=self.object,
@@ -155,8 +176,41 @@ class MyCoursesView(LoginRequiredMixin, StudentRequiredMixin, ListView):
             Enrollment.objects
             .filter(student=self.request.user)
             .select_related('course', 'course__author')
-            .annotate(card_count=Count('course__cards'))
+            .annotate(
+                card_count=Count('course__cards', distinct=True),
+                progressed_count=Count(
+                    'card_progresses',
+                    filter=Q(card_progresses__level__gt=0),
+                    distinct=True,
+                ),
+            )
         )
+
+
+class StudentStatsView(LoginRequiredMixin, StudentRequiredMixin, TemplateView):
+    template_name = 'courses/student_stats.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        enrollments = list(
+            Enrollment.objects.filter(student=user).select_related('course')
+        )
+        week_ago = timezone.now() - timedelta(days=7)
+        context.update({
+            'active_courses': sum(
+                1 for e in enrollments if e.status == Enrollment.Status.ACTIVE
+            ),
+            'completed_courses': sum(
+                1 for e in enrollments if e.status == Enrollment.Status.COMPLETED
+            ),
+            # выучено слово = обе стороны карточки на максимуме; суммируем по курсам
+            'learned_words': sum(e.learned_cards_count for e in enrollments),
+            'answers_week': AnswerLog.objects.filter(
+                student=user, answered_at__gte=week_ago,
+            ).count(),
+        })
+        return context
 
 
 class EnrollmentLeaveView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, UpdateView):
@@ -276,7 +330,9 @@ def _check_course_completed(enrollment):
         and enrollment.learned_progress_count >= total
     ):
         enrollment.status = Enrollment.Status.COMPLETED
-        enrollment.save(update_fields=['status'])
+        enrollment.completions_count += 1
+        enrollment.ever_completed = True
+        enrollment.save(update_fields=['status', 'completions_count', 'ever_completed'])
         return True
     return False
 
@@ -360,6 +416,9 @@ def train_answer(request, pk):
     progress.last_answered_at = timezone.now()
     counter = 'answers_correct' if was_correct else 'answers_wrong'
     Enrollment.objects.filter(pk=enrollment.pk).update(**{counter: F(counter) + 1})
+    AnswerLog.objects.create(
+        student=request.user, enrollment=enrollment, is_correct=was_correct,
+    )
 
     info = state['cards'][str(progress_id)]
     state['queue'].pop(0)
@@ -423,6 +482,28 @@ def train_feedback(request, pk):
         'learned': enrollment.learned_progress_count,
         'total': enrollment.total_progress_count,
         'session_done': state.get('done', False),
+    })
+
+
+@login_required
+def course_restart(request, pk):
+    """Сброс прогресса и повторное прохождение курса: все уровни в 0,
+    статус в active, редирект на тренировку. GET показывает подтверждение
+    (для завершённого курса), POST выполняет сброс. Поля completions_count
+    и ever_completed НЕ трогаем — история прохождений сохраняется."""
+    course = get_object_or_404(Course, pk=pk)
+    if request.user.role != User.Role.STUDENT:
+        raise PermissionDenied('Тренировка доступна только ученикам.')
+    enrollment = get_object_or_404(Enrollment, student=request.user, course=course)
+    if request.method == 'POST':
+        CardProgress.objects.filter(enrollment=enrollment).update(level=0)
+        enrollment.status = Enrollment.Status.ACTIVE
+        enrollment.save(update_fields=['status'])
+        request.session.pop(_training_key(enrollment), None)
+        messages.success(request, f'Начинаем курс «{course.title}» заново.')
+        return redirect('train', pk=course.pk)
+    return render(request, 'courses/course_confirm_restart.html', {
+        'course': course, 'enrollment': enrollment,
     })
 
 
