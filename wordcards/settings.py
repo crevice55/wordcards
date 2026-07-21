@@ -164,8 +164,12 @@ STORAGES = {
 if not DEBUG:
     # За nginx/прокси, терминирующим TLS: доверяем заголовку о протоколе.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # Secure-куки по умолчанию False, чтобы работать по HTTP: иначе браузер не
+    # отправляет CSRF-cookie и формы отклоняются с 403. Включить (COOKIE_SECURE=1)
+    # вместе с HTTPS.
+    COOKIE_SECURE = os.environ.get('COOKIE_SECURE', '0') == '1'
+    SESSION_COOKIE_SECURE = COOKIE_SECURE
+    CSRF_COOKIE_SECURE = COOKIE_SECURE
     # По умолчанию False, чтобы на старте по IP без HTTPS не было редирект-петли.
     # Включить (SECURE_SSL_REDIRECT=1) после настройки HTTPS. HSTS добавим позже.
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', '') == '1'
