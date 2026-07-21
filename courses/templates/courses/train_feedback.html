@@ -9,7 +9,7 @@
             <a href="{% url 'course_detail' course.pk %}" class="btn btn-link btn-sm pe-0">Прервать</a>
         </div>
         <div class="progress mb-4" style="height: 6px;">
-            <div class="progress-bar bg-success" style="width: {% widthratio learned total 100 %}%"></div>
+            <div class="progress-bar bg-success" style="width: {{ bar_percent }}%"></div>
         </div>
         <div class="card shadow-sm">
             <div class="card-body p-4 text-center">

@@ -1,0 +1,9 @@
+{% comment %}Раскраска лучшего результата: зелёный 80-100, жёлтый 50-79,
+коричневый <50, прочерк — если ещё не проходил (score пуст).
+Использование: {% include 'courses/_score_badge.html' with score=enrollment.best_score %}{% endcomment %}
+{% if score == None %}
+    <span class="text-muted">—</span>
+{% else %}
+    <span class="fw-semibold {% if score >= 80 %}text-success{% elif score >= 50 %}text-warning{% endif %}"
+          {% if score < 50 %}style="color: #795548;"{% endif %}>{{ score }}%</span>
+{% endif %}

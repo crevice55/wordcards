@@ -37,6 +37,12 @@
                                     </div>
                                     <small class="text-muted text-nowrap">выучено {{ enrollment.learned_cards_count }} из {{ enrollment.card_count }}</small>
                                 </div>
+                                {% if enrollment.status == 'completed' %}
+                                    <div class="small text-muted mt-1">
+                                        прохождений: {{ enrollment.completions_count }} ·
+                                        лучший: {% include 'courses/_score_badge.html' with score=enrollment.best_score %}
+                                    </div>
+                                {% endif %}
                             </td>
                             <td class="text-end">
                                 {% if enrollment.card_count %}

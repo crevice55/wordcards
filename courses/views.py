@@ -107,6 +107,9 @@ class CourseDetailView(LoginRequiredMixin, DetailView):
             context['total_completions'] = (
                 enrollments.aggregate(total=Sum('completions_count'))['total'] or 0
             )
+            context['course_students'] = (
+                enrollments.select_related('student').order_by('student__username')
+            )
         if self.request.user.role == User.Role.STUDENT:
             context['enrollment'] = Enrollment.objects.filter(
                 student=self.request.user, course=self.object,
@@ -234,18 +237,19 @@ class EnrollmentLeaveView(LoginRequiredMixin, EnrollmentOwnerRequiredMixin, Upda
 # Единица заучивания — объект CardProgress (карточка + направление).
 # Тренировка сквозная на весь курс: в очередь попадают все направления
 # с уровнем < MAX_LEVEL. Направление «проходит заход» после LEARNED_STREAK
-# верных подряд: уровень сохраняется в БД сразу (без ошибок в заходе — +1,
-# была ошибка — 0); достигшее MAX_LEVEL фиксируется и больше не предлагается,
-# остальные возвращаются в конец очереди. Уровни живут в БД, поэтому при
-# новом входе тренировка продолжается с текущего места. Неверный ответ —
-# сброс счётчика верных и возврат через 2–3 позиции. Счётчики ответов
-# копятся в Enrollment.answers_correct / answers_wrong (переживают выход).
+# верных подряд: уровень растёт (+1, до MAX_LEVEL) и сохраняется в БД сразу;
+# достигшее MAX_LEVEL фиксируется и больше не предлагается, остальные
+# возвращаются в конец очереди. Уровни живут в БД, поэтому при новом входе
+# тренировка продолжается с текущего места. Неверный ответ НЕМЕДЛЕННО
+# сбрасывает уровень и стрик этого направления в 0 (полоска едет назад сразу)
+# и возвращает вопрос через 2–3 позиции. Счётчики ответов копятся в
+# Enrollment.answers_correct / answers_wrong (переживают выход).
 # Состояние текущего прохода в request.session под ключом training_<enrollment_id>:
 # {'v': 4, 'queue': [id объектов прогресса, первый — текущий вопрос],
-#  'cards': {str(progress_id): {'streak': верных подряд, 'errors': ошибок в заходе}},
+#  'cards': {str(progress_id): {'streak': верных подряд}},
 #  'last': результат последнего ответа, 'done': bool, 'course_completed': bool}.
 
-LEARNED_STREAK = 2
+LEARNED_STREAK = CardProgress.STREAK_TO_ADVANCE
 STATE_VERSION = 4
 
 
@@ -314,7 +318,7 @@ def _build_queue(course, enrollment):
     return {
         'v': STATE_VERSION,
         'queue': selected,
-        'cards': {str(progress_id): {'streak': 0, 'errors': 0} for progress_id in selected},
+        'cards': {str(progress_id): {'streak': 0} for progress_id in selected},
         'done': False,
         'course_completed': False,
     }
@@ -329,10 +333,18 @@ def _check_course_completed(enrollment):
         and total
         and enrollment.learned_progress_count >= total
     ):
+        # счётчики ответов могли обновиться через .update() в этом же запросе —
+        # берём их из БД, чтобы процент был точным
+        enrollment.refresh_from_db(fields=['answers_correct', 'answers_wrong'])
+        score = enrollment.accuracy_percent
         enrollment.status = Enrollment.Status.COMPLETED
         enrollment.completions_count += 1
         enrollment.ever_completed = True
-        enrollment.save(update_fields=['status', 'completions_count', 'ever_completed'])
+        if enrollment.best_score is None or score > enrollment.best_score:
+            enrollment.best_score = score
+        enrollment.save(update_fields=[
+            'status', 'completions_count', 'ever_completed', 'best_score',
+        ])
         return True
     return False
 
@@ -382,8 +394,7 @@ def train(request, pk):
         'prompt': prompt,
         'is_word_to_translation': progress.direction == CardProgress.Direction.WORD_TO_TRANSLATION,
         'choices': _build_choices(course, progress),
-        'learned': enrollment.learned_progress_count,
-        'total': enrollment.total_progress_count,
+        'bar_percent': enrollment.level_progress_percent,
     })
 
 
@@ -425,24 +436,30 @@ def train_answer(request, pk):
     if was_correct:
         info['streak'] += 1
         if info['streak'] >= LEARNED_STREAK:
-            # заход по направлению завершён — фиксируем уровень сразу
-            progress.level = 0 if info['errors'] else min(progress.level + 1, CardProgress.MAX_LEVEL)
+            # заход по направлению закрыт — уровень всегда растёт (ошибки уже
+            # обнулили заход немедленно), стрик обнуляется
+            progress.level = min(progress.level + 1, CardProgress.MAX_LEVEL)
+            info['streak'] = 0
+            progress.current_streak = 0
             if progress.level < CardProgress.MAX_LEVEL:
                 # ещё не выучено — новый заход с чистым счётом, в конец очереди
-                info['streak'] = 0
-                info['errors'] = 0
                 state['queue'].append(progress_id)
-            progress.save(update_fields=['level', 'last_answered_at'])
+            progress.save(update_fields=['level', 'current_streak', 'last_answered_at'])
         else:
+            # верный ответ внутри захода — уровень тот же, но стрик двигает полоску
+            progress.current_streak = info['streak']
             state['queue'].append(progress_id)
-            progress.save(update_fields=['last_answered_at'])
+            progress.save(update_fields=['current_streak', 'last_answered_at'])
     else:
+        # ошибка сбрасывает заход НЕМЕДЛЕННО: и уровень, и стрик этого
+        # направления в 0 — полоска едет назад уже на этом ответе
         info['streak'] = 0
-        info['errors'] += 1
+        progress.level = 0
+        progress.current_streak = 0
         # возврат через 2-3 позиции
         position = min(random.randint(2, 3), len(state['queue']))
         state['queue'].insert(position, progress_id)
-        progress.save(update_fields=['last_answered_at'])
+        progress.save(update_fields=['level', 'current_streak', 'last_answered_at'])
 
     state['last'] = {
         'word': prompt,
@@ -479,8 +496,7 @@ def train_feedback(request, pk):
     return render(request, 'courses/train_feedback.html', {
         'course': course,
         'last': state['last'],
-        'learned': enrollment.learned_progress_count,
-        'total': enrollment.total_progress_count,
+        'bar_percent': enrollment.level_progress_percent,
         'session_done': state.get('done', False),
     })
 
@@ -496,7 +512,7 @@ def course_restart(request, pk):
         raise PermissionDenied('Тренировка доступна только ученикам.')
     enrollment = get_object_or_404(Enrollment, student=request.user, course=course)
     if request.method == 'POST':
-        CardProgress.objects.filter(enrollment=enrollment).update(level=0)
+        CardProgress.objects.filter(enrollment=enrollment).update(level=0, current_streak=0)
         enrollment.status = Enrollment.Status.ACTIVE
         enrollment.save(update_fields=['status'])
         request.session.pop(_training_key(enrollment), None)

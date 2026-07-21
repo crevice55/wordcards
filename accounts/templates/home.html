@@ -124,6 +124,10 @@
                             <div>
                                 <a href="{% url 'course_detail' enrollment.course.pk %}">{{ enrollment.course.title }}</a>
                                 <span class="badge bg-success ms-1">Завершён</span>
+                                <div class="small text-muted mt-1">
+                                    прохождений: {{ enrollment.completions_count }} ·
+                                    лучший: {% include 'courses/_score_badge.html' with score=enrollment.best_score %}
+                                </div>
                             </div>
                             <a href="{% url 'course_restart' enrollment.course.pk %}" class="btn btn-outline-primary btn-sm">Пройти заново</a>
                         </div>

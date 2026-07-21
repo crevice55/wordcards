@@ -57,6 +57,9 @@ class Enrollment(models.Model):
     answers_wrong = models.PositiveIntegerField('Неверных ответов', default=0)
     completions_count = models.PositiveIntegerField('Успешных прохождений', default=0)
     ever_completed = models.BooleanField('Пройден хотя бы раз', default=False)
+    best_score = models.PositiveSmallIntegerField(
+        'Лучший результат, %', null=True, blank=True,
+    )
 
     class Meta:
         verbose_name = 'Запись на курс'
@@ -110,9 +113,27 @@ class Enrollment(models.Model):
             return 0
         return round(100 * self.answers_correct / total)
 
+    @property
+    def level_progress_percent(self):
+        """Реагирующий прогресс тренировки с учётом стрика внутри уровня.
+        Под-прогресс направления = level * STREAK_TO_ADVANCE + current_streak,
+        поэтому первый же верный ответ двигает полоску, а закрытие захода
+        (стрик → уровень +1, стрик 0) не откатывает её назад."""
+        step = CardProgress.STREAK_TO_ADVANCE
+        denominator = self.total_progress_count * CardProgress.MAX_LEVEL * step
+        if not denominator:
+            return 0
+        agg = self.card_progresses.aggregate(
+            levels=models.Sum('level'), streaks=models.Sum('current_streak'),
+        )
+        numerator = (agg['levels'] or 0) * step + (agg['streaks'] or 0)
+        return round(100 * numerator / denominator)
+
 
 class CardProgress(models.Model):
     MAX_LEVEL = 2
+    # Сколько верных подряд закрывают заход и поднимают уровень.
+    STREAK_TO_ADVANCE = 2
 
     class Direction(models.TextChoices):
         WORD_TO_TRANSLATION = 'word_to_translation', 'Слово → перевод'
@@ -141,6 +162,7 @@ class CardProgress(models.Model):
         default=0,
         validators=[MaxValueValidator(MAX_LEVEL)],
     )
+    current_streak = models.PositiveSmallIntegerField('Верных подряд', default=0)
     last_answered_at = models.DateTimeField('Последний ответ', null=True, blank=True)
 
     class Meta:
