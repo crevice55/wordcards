@@ -10,22 +10,35 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+# Настройки читаются из переменных окружения; дефолты рассчитаны на локальную
+# разработку на Windows (DEBUG=True, SQLite). На боевом сервере переменные
+# окружения переключают проект в продакшен-режим. См. .env.example.
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-x!muvw9fu-twf0!n_e_h6(dk4)s3are9bzs5lh9$@2!(@i!9$-'
+# Дефолт — небезопасный ключ только для локальной разработки; на проде задать SECRET_KEY.
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-x!muvw9fu-twf0!n_e_h6(dk4)s3are9bzs5lh9$@2!(@i!9$-',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Локально по умолчанию True; на проде выставить DEBUG=0.
+DEBUG = os.environ.get('DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+
+# Доверенные источники для CSRF (нужны за HTTPS/доменом на Django 4+).
+# Пусто локально; на проде — 'https://example.com,https://www.example.com'.
+CSRF_TRUSTED_ORIGINS = [
+    origin for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if origin
+]
 
 
 # Application definition
@@ -43,6 +56,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise раздаёт статику без nginx; должен идти сразу после SecurityMiddleware.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -74,12 +89,23 @@ WSGI_APPLICATION = 'wordcards.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Если задана DATABASE_URL — используем её (обычно PostgreSQL на проде),
+# иначе SQLite для локальной разработки. Формат:
+# postgres://USER:PASSWORD@HOST:PORT/NAME
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if DATABASE_URL:
+    import dj_database_url
+
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600),
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -117,6 +143,32 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# На проде статику отдаёт WhiteNoise со сжатием и манифестом (нужен collectstatic).
+# Локально (DEBUG=True) — обычное хранилище, чтобы админка работала без collectstatic.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': (
+            'django.contrib.staticfiles.storage.StaticFilesStorage'
+            if DEBUG
+            else 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        ),
+    },
+}
+
+# Транспортный харденинг — только на проде (DEBUG=False).
+if not DEBUG:
+    # За nginx/прокси, терминирующим TLS: доверяем заголовку о протоколе.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # По умолчанию False, чтобы на старте по IP без HTTPS не было редирект-петли.
+    # Включить (SECURE_SSL_REDIRECT=1) после настройки HTTPS. HSTS добавим позже.
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', '') == '1'
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'

@@ -25,7 +25,7 @@ staticfiles/
 .vscode/
 
 # Claude Code
-.claude/settings.local.json
+.claude/
 
 # OS
 .DS_Store
