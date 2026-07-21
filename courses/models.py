@@ -132,8 +132,11 @@ class Enrollment(models.Model):
 
 class CardProgress(models.Model):
     MAX_LEVEL = 2
-    # Сколько верных подряд закрывают заход и поднимают уровень.
-    STREAK_TO_ADVANCE = 2
+    # Сколько верных ответов закрывают заход и поднимают уровень. При значении 1
+    # каждый верный ответ сразу поднимает уровень (интервальное повторение:
+    # направление выучивается за MAX_LEVEL верных ответов в разных подходах, а не
+    # за серию подряд). Тогда current_streak всегда 0 — стрик не копится.
+    STREAK_TO_ADVANCE = 1
 
     class Direction(models.TextChoices):
         WORD_TO_TRANSLATION = 'word_to_translation', 'Слово → перевод'
